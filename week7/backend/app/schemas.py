@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
+import re
 
 
 class NoteCreate(BaseModel):
@@ -35,6 +36,7 @@ class NoteRead(BaseModel):
     title: str
     content: str
     project_id: int | None = None
+    tags: list[TagRead] = []
     created_at: datetime
     updated_at: datetime
 
@@ -64,6 +66,7 @@ class ActionItemRead(BaseModel):
     description: str
     completed: bool
     project_id: int | None = None
+    tags: list[TagRead] = []
     created_at: datetime
     updated_at: datetime
 
@@ -110,3 +113,38 @@ class ProjectRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class TagCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=50)
+    color: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_format(cls, value: str) -> str:
+        if not value.replace("-", "").replace("_", "").isalnum():
+            raise ValueError("Tag name can only contain letters, numbers, hyphens, and underscores")
+        return value.lower().strip()
+
+    @field_validator("color")
+    @classmethod
+    def validate_color_format(cls, value: str | None) -> str | None:
+        if value and not re.match(r"^#[0-9A-Fa-f]{6}$", value):
+            raise ValueError("Color must be a valid hex color code (e.g., #FF5733)")
+        return value
+
+
+class TagRead(BaseModel):
+    id: int
+    name: str
+    color: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TagUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=50)
+    color: str | None = None

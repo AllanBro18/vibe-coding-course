@@ -62,38 +62,114 @@ def test_extract_items_endpoint(client):
 
 
 def test_action_items_pagination_and_sorting(client):
-    # Create multiple items, mark one completed
-    ids: list[int] = []
-    for i in range(3):
-        r = client.post("/action-items/", json={"description": f"Task {i}"})
+    # Create multiple action items
+    created_items = []
+    for i in range(8):
+        r = client.post("/action-items/", json={"description": f"Task {i:02d}"})
         assert r.status_code == 201
-        ids.append(r.json()["id"])
+        created_items.append(r.json())
 
-    r = client.put(f"/action-items/{ids[0]}/complete")
-    assert r.status_code == 200
+    # Mark some as completed
+    completed_ids = [created_items[0]["id"], created_items[2]["id"], created_items[4]["id"]]
+    for item_id in completed_ids:
+        r = client.put(f"/action-items/{item_id}/complete")
+        assert r.status_code == 200
 
-    # Verify sorting by id ascending
+    # Test sorting by id ascending
     r = client.get("/action-items/", params={"sort": "id"})
     assert r.status_code == 200
     items = r.json()
-    all_ids = [item["id"] for item in items]
-    assert all_ids == sorted(all_ids)
+    ids = [item["id"] for item in items]
+    assert ids == sorted(ids)
 
-    # Pagination with filter: only completed items, limit/skip
-    r = client.get(
-        "/action-items/",
-        params={"completed": True, "sort": "id", "skip": 0, "limit": 1},
-    )
+    # Test descending sort
+    r = client.get("/action-items/", params={"sort": "-id"})
+    assert r.status_code == 200
+    items_desc = r.json()
+    ids_desc = [item["id"] for item in items_desc]
+    assert ids_desc == sorted(ids, reverse=True)
+
+    # Test pagination with skip and limit
+    r = client.get("/action-items/", params={"sort": "id", "skip": 2, "limit": 3})
     assert r.status_code == 200
     page = r.json()
-    assert len(page) == 1
-    assert page[0]["completed"] is True
+    assert len(page) == 3
+    assert page[0]["id"] == ids[2]
+    assert page[1]["id"] == ids[3]
+    assert page[2]["id"] == ids[4]
 
-    # Invalid sort falls back to -created_at
+    # Test pagination with filtering: only completed items
+    r = client.get("/action-items/", params={"completed": True, "sort": "id", "skip": 0, "limit": 2})
+    assert r.status_code == 200
+    completed_page = r.json()
+    assert len(completed_page) == 2
+    assert all(item["completed"] for item in completed_page)
+    completed_page_ids = [item["id"] for item in completed_page]
+    assert completed_page_ids == sorted(completed_ids)[:2]
+
+    # Test pagination with filtering: only pending items
+    r = client.get("/action-items/", params={"completed": False, "sort": "id", "skip": 1, "limit": 2})
+    assert r.status_code == 200
+    pending_page = r.json()
+    assert len(pending_page) == 2
+    assert all(not item["completed"] for item in pending_page)
+
+    # Test edge case: skip beyond available filtered items
+    r = client.get("/action-items/", params={"completed": True, "sort": "id", "skip": 10, "limit": 5})
+    assert r.status_code == 200
+    empty_filtered_page = r.json()
+    assert len(empty_filtered_page) == 0
+
+    # Test boundary: limit = 1 (minimum allowed)
+    r = client.get("/action-items/", params={"sort": "id", "limit": 1})
+    assert r.status_code == 200
+    single_item = r.json()
+    assert len(single_item) == 1
+
+    # Test maximum limit (200)
+    r = client.get("/action-items/", params={"sort": "id", "limit": 200})
+    assert r.status_code == 200
+    max_limit = r.json()
+    assert len(max_limit) <= 200
+
+    # Test sorting by description
+    r = client.get("/action-items/", params={"sort": "description"})
+    assert r.status_code == 200
+    desc_sorted = r.json()
+    descriptions = [item["description"] for item in desc_sorted]
+    assert descriptions == sorted(descriptions)
+
+    # Test invalid sort field falls back to -created_at
     r_default = client.get("/action-items/", params={"sort": "-created_at"})
-    r_invalid = client.get("/action-items/", params={"sort": "does_not_exist"})
+    r_invalid = client.get("/action-items/", params={"sort": "invalid_field"})
     assert r_default.status_code == 200
     assert r_invalid.status_code == 200
-    ids_default = [item["id"] for item in r_default.json()]
-    ids_invalid = [item["id"] for item in r_invalid.json()]
-    assert ids_invalid == ids_default
+    default_ids = [item["id"] for item in r_default.json()]
+    invalid_ids = [item["id"] for item in r_invalid.json()]
+    assert invalid_ids == default_ids
+
+    # Test consistency: same parameters return same results
+    r1 = client.get("/action-items/", params={"sort": "id", "limit": 3, "completed": False})
+    r2 = client.get("/action-items/", params={"sort": "id", "limit": 3, "completed": False})
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    assert r1.json() == r2.json()
+
+    # Test parameter validation: negative skip
+    r = client.get("/action-items/", params={"skip": -1})
+    assert r.status_code == 422
+
+    # Test parameter validation: limit too low should fail (limit must be >= 1)
+    r = client.get("/action-items/", params={"limit": 0})
+    assert r.status_code == 422
+
+    # Test parameter validation: limit too high
+    r = client.get("/action-items/", params={"limit": 201})
+    assert r.status_code == 422
+
+    # Test combined filtering and pagination with large skip
+    r = client.get("/action-items/", params={"completed": False, "sort": "-id", "skip": 5, "limit": 10})
+    assert r.status_code == 200
+    large_skip_page = r.json()
+    # Should return remaining items after skip, limited by actual available items
+    assert len(large_skip_page) <= 5  # 8 total - 3 completed = 5 pending, skip 5 = 0

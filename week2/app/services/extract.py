@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import os
 import re
-from typing import List
 import json
-from typing import Any
+from typing import Any, List
 from ollama import chat
 from dotenv import load_dotenv
 
@@ -87,3 +85,65 @@ def _looks_imperative(sentence: str) -> bool:
         "investigate",
     }
     return first.lower() in imperative_starters
+
+
+def extract_action_items_llm(text: str) -> List[str]:
+    """
+    Extract action items using an Ollama-hosted LLM and return a JSON list of strings.
+
+    The model is instructed to return *only* a JSON array (e.g. ["Do X", "Do Y"]).
+    """
+    prompt = (
+        "Extract the actionable tasks (action items) from the input text.\n"
+        "Return ONLY a valid JSON array of strings.\n"
+        "Rules:\n"
+        "- Each item must be a short, specific action (imperative verb).\n"
+        "- Do not include numbering or bullet characters.\n"
+        "- Do not include any extra keys, objects, or commentary.\n"
+        "- If there are no action items, return []."
+    )
+
+    response = chat(
+        model="llama3.1:8b",
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": text},
+        ],
+        format="json",
+    )
+
+    content = (
+        (response or {})
+        .get("message", {})
+        .get("content", "")
+        .strip()
+    )
+
+    try:
+        parsed: Any = json.loads(content)
+    except json.JSONDecodeError:
+        return extract_action_items(text)
+
+    if isinstance(parsed, dict) and "action_items" in parsed:
+        parsed = parsed["action_items"]
+
+    if not isinstance(parsed, list):
+        return extract_action_items(text)
+
+    cleaned: List[str] = []
+    seen: set[str] = set()
+    for item in parsed:
+        if not isinstance(item, str):
+            continue
+        s = BULLET_PREFIX_PATTERN.sub("", item).strip()
+        s = s.removeprefix("[ ]").strip()
+        s = s.removeprefix("[todo]").strip()
+        if not s:
+            continue
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(s)
+
+    return cleaned

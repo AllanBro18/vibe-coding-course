@@ -16,20 +16,36 @@ def test_extract_action_items_basic_markers():
     assert "Not actionable" not in items
 
 
-def test_extract_action_items_extended_patterns():
+def test_extract_action_items_enhanced_patterns():
     text = """
-    1. Fix login bug
-    2. implement feature flag
-    * Review deployment plan
-    [ ] write docs
-    [x] update changelog
-    This is just commentary.
+    Urgent: fix security vulnerability by tomorrow
+    @john should review the database migration
+    What should we do about the failing tests?
+    After deployment, monitor error rates
+    Schedule team meeting for next week
+    Need to upgrade dependencies immediately
+    Contact client about project deadline
+    Investigate performance issue by end of day
     """.strip()
+    
     items = extract_action_items(text)
-
-    assert "1. Fix login bug" in items
-    assert "2. implement feature flag" in items
-    assert "Review deployment plan" in {i.lstrip("* ").strip() for i in items}
-    assert "[ ] write docs" in items
-    assert "[x] update changelog" in items
-    assert "This is just commentary." not in items
+    
+    # Priority and urgency
+    assert any("fix security vulnerability" in item for item in items)
+    
+    # Assignment patterns
+    assert any("@john" in item for item in items)
+    
+    # Question patterns
+    assert any("failing tests" in item for item in items)
+    
+    # Conditional actions
+    assert any("deployment" in item and "monitor" in item for item in items)
+    
+    # Time-based patterns
+    assert any("next week" in item for item in items)
+    
+    # Additional action verbs
+    assert any("upgrade dependencies" in item.lower() for item in items)
+    assert any("contact client" in item.lower() for item in items)
+    assert any("investigate performance" in item.lower() for item in items)

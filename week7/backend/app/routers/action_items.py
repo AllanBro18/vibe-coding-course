@@ -3,7 +3,7 @@ from sqlalchemy import asc, desc, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import ActionItem
+from ..models import ActionItem, Tag
 from ..schemas import ActionItemCreate, ActionItemPatch, ActionItemRead
 from ..services.extract import extract_action_items
 
@@ -104,3 +104,37 @@ def patch_item(
 def extract_items_from_text(payload: dict) -> list[str]:
     text = payload.get("text", "")
     return extract_action_items(text)
+
+
+@router.post("/{item_id}/tags/{tag_id}", status_code=204)
+def add_tag_to_action_item(item_id: int, tag_id: int, db: Session = Depends(get_db)) -> None:
+    item = db.get(ActionItem, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Action item not found")
+    
+    tag = db.get(Tag, tag_id)
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    
+    if tag in item.tags:
+        raise HTTPException(status_code=409, detail="Tag already associated with this action item")
+    
+    item.tags.append(tag)
+    db.flush()
+
+
+@router.delete("/{item_id}/tags/{tag_id}", status_code=204)
+def remove_tag_from_action_item(item_id: int, tag_id: int, db: Session = Depends(get_db)) -> None:
+    item = db.get(ActionItem, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Action item not found")
+    
+    tag = db.get(Tag, tag_id)
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    
+    if tag not in item.tags:
+        raise HTTPException(status_code=404, detail="Tag not associated with this action item")
+    
+    item.tags.remove(tag)
+    db.flush()

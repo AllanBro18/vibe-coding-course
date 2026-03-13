@@ -1,5 +1,3 @@
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import asc, desc, select
 from sqlalchemy.orm import Session
@@ -7,6 +5,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import ActionItem
 from ..schemas import ActionItemCreate, ActionItemPatch, ActionItemRead
+from ..services.extract import extract_action_items
 
 router = APIRouter(prefix="/action-items", tags=["action_items"])
 
@@ -14,10 +13,18 @@ router = APIRouter(prefix="/action-items", tags=["action_items"])
 @router.get("/", response_model=list[ActionItemRead])
 def list_items(
     db: Session = Depends(get_db),
-    completed: Optional[bool] = None,
-    skip: int = 0,
-    limit: int = Query(50, le=200),
-    sort: str = Query("-created_at"),
+    completed: bool | None = None,
+    skip: int = Query(0, ge=0, description="Number of items to skip for pagination"),
+    limit: int = Query(
+        50,
+        ge=1,
+        le=200,
+        description="Maximum number of items to return (1-200)",
+    ),
+    sort: str = Query(
+        "-created_at",
+        description="Sort by field, prefix with - for descending (e.g. -created_at)",
+    ),
 ) -> list[ActionItemRead]:
     stmt = select(ActionItem)
     if completed is not None:
@@ -36,11 +43,32 @@ def list_items(
 
 @router.post("/", response_model=ActionItemRead, status_code=201)
 def create_item(payload: ActionItemCreate, db: Session = Depends(get_db)) -> ActionItemRead:
-    item = ActionItem(description=payload.description, completed=False)
+    item = ActionItem(
+        description=payload.description,
+        completed=False,
+        project_id=payload.project_id,
+    )
     db.add(item)
     db.flush()
     db.refresh(item)
     return ActionItemRead.model_validate(item)
+
+
+@router.get("/{item_id}", response_model=ActionItemRead)
+def get_item(item_id: int, db: Session = Depends(get_db)) -> ActionItemRead:
+    item = db.get(ActionItem, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Action item not found")
+    return ActionItemRead.model_validate(item)
+
+
+@router.delete("/{item_id}", status_code=204)
+def delete_item(item_id: int, db: Session = Depends(get_db)) -> None:
+    item = db.get(ActionItem, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Action item not found")
+    db.delete(item)
+    db.flush()
 
 
 @router.put("/{item_id}/complete", response_model=ActionItemRead)
@@ -56,7 +84,9 @@ def complete_item(item_id: int, db: Session = Depends(get_db)) -> ActionItemRead
 
 
 @router.patch("/{item_id}", response_model=ActionItemRead)
-def patch_item(item_id: int, payload: ActionItemPatch, db: Session = Depends(get_db)) -> ActionItemRead:
+def patch_item(
+    item_id: int, payload: ActionItemPatch, db: Session = Depends(get_db)
+) -> ActionItemRead:
     item = db.get(ActionItem, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Action item not found")
@@ -70,3 +100,7 @@ def patch_item(item_id: int, payload: ActionItemPatch, db: Session = Depends(get
     return ActionItemRead.model_validate(item)
 
 
+@router.post("/extract", response_model=list[str])
+def extract_items_from_text(payload: dict) -> list[str]:
+    text = payload.get("text", "")
+    return extract_action_items(text)

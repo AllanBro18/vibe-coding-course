@@ -1,6 +1,6 @@
+from collections.abc import Generator
 import os
 import tempfile
-from collections.abc import Generator
 
 import pytest
 from backend.app.db import get_db
@@ -36,6 +36,9 @@ def client() -> Generator[TestClient, None, None]:
     with TestClient(app) as c:
         yield c
 
-    os.unlink(db_path)
-
-
+    try:
+        os.unlink(db_path)
+    except PermissionError:
+        # On some platforms (e.g., Windows), the database file can still be
+        # locked briefly; ignore unlink errors during test teardown.
+        pass

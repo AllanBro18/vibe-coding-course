@@ -3,7 +3,7 @@ from sqlalchemy import asc, desc, func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import Note
+from ..models import Note, Tag
 from ..schemas import NoteCreate, NotePatch, NoteRead
 
 router = APIRouter(prefix="/notes", tags=["notes"])
@@ -93,6 +93,40 @@ def delete_note(note_id: int, db: Session = Depends(get_db)) -> None:
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
     db.delete(note)
+    db.flush()
+
+
+@router.post("/{note_id}/tags/{tag_id}", status_code=204)
+def add_tag_to_note(note_id: int, tag_id: int, db: Session = Depends(get_db)) -> None:
+    note = db.get(Note, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    
+    tag = db.get(Tag, tag_id)
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    
+    if tag in note.tags:
+        raise HTTPException(status_code=409, detail="Tag already associated with this note")
+    
+    note.tags.append(tag)
+    db.flush()
+
+
+@router.delete("/{note_id}/tags/{tag_id}", status_code=204)
+def remove_tag_from_note(note_id: int, tag_id: int, db: Session = Depends(get_db)) -> None:
+    note = db.get(Note, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    
+    tag = db.get(Tag, tag_id)
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    
+    if tag not in note.tags:
+        raise HTTPException(status_code=404, detail="Tag not associated with this note")
+    
+    note.tags.remove(tag)
     db.flush()
 
 

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import asc, desc, select
+from sqlalchemy import asc, desc, func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -50,6 +50,20 @@ def create_note(payload: NoteCreate, db: Session = Depends(get_db)) -> NoteRead:
     return NoteRead.model_validate(note)
 
 
+@router.put("/{note_id}", response_model=NoteRead)
+def update_note(note_id: int, payload: NoteCreate, db: Session = Depends(get_db)) -> NoteRead:
+    note = db.get(Note, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    note.title = payload.title
+    note.content = payload.content
+    note.project_id = payload.project_id
+    db.add(note)
+    db.flush()
+    db.refresh(note)
+    return NoteRead.model_validate(note)
+
+
 @router.patch("/{note_id}", response_model=NoteRead)
 def patch_note(note_id: int, payload: NotePatch, db: Session = Depends(get_db)) -> NoteRead:
     note = db.get(Note, note_id)
@@ -80,3 +94,16 @@ def delete_note(note_id: int, db: Session = Depends(get_db)) -> None:
         raise HTTPException(status_code=404, detail="Note not found")
     db.delete(note)
     db.flush()
+
+
+@router.get("/stats", response_model=dict)
+def get_notes_stats(db: Session = Depends(get_db)) -> dict:
+    total_count = db.scalar(select(func.count(Note.id)))
+    total_content_length = db.scalar(select(func.sum(func.length(Note.content))))
+    avg_title_length = db.scalar(select(func.avg(func.length(Note.title))))
+    
+    return {
+        "total_notes": total_count or 0,
+        "total_content_length": total_content_length or 0,
+        "average_title_length": round(avg_title_length or 0, 2),
+    }
